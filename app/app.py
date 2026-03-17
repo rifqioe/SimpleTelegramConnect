@@ -1,6 +1,5 @@
-import random
-import string
 import os
+import pyotp
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -18,8 +17,9 @@ from database.database import (
 )
 
 
-def generate_otp() -> str:
-    return ''.join(random.choices(string.digits, k=OTP_LENGTH))
+def generate_otp(secret: str) -> str:
+    totp = pyotp.TOTP(secret, interval=OTP_EXPIRY_SECONDS)
+    return totp.now()
 
 
 def login_flow() -> dict | None:
@@ -58,7 +58,9 @@ def generate_otp_flow(user: dict):
         elif choice != '1':
             return
 
-    otp_code = generate_otp()
+    secret = user.get("otp_secret") or pyotp.random_base32()
+    otp_code = generate_otp(secret)
+
     expires_at = datetime.now() + timedelta(seconds=OTP_EXPIRY_SECONDS)
     save_otp(user["id"], otp_code, expires_at.isoformat(), telegram_id=None)
 

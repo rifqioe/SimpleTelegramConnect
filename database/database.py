@@ -26,6 +26,7 @@ def init_db():
             email TEXT,
             password_hash TEXT NOT NULL,
             name TEXT NOT NULL,
+            otp_secret TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -83,11 +84,13 @@ def seed_dummy_users():
         ("jane", "jane@example.com", "jane789", "Jane Smith"),
     ]
 
+    import pyotp
     for username, email, password, name in dummy_users:
         try:
+            otp_secret = pyotp.random_base32()
             cursor.execute(
-                "INSERT INTO users (username, email, password_hash, name) VALUES (?, ?, ?, ?)",
-                (username, email, hash_password(password), name)
+                "INSERT INTO users (username, email, password_hash, name, otp_secret) VALUES (?, ?, ?, ?, ?)",
+                (username, email, hash_password(password), name, otp_secret)
             )
         except sqlite3.IntegrityError:
             pass

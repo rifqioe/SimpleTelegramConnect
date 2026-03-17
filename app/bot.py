@@ -4,6 +4,7 @@ import json
 import random
 import string
 import logging
+import pyotp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import NetworkError, Forbidden, Conflict, TimedOut
@@ -38,7 +39,13 @@ from database.database import (
 )
 
 def _generate_otp(user: dict, telegram_id: str = None):
-    otp_code = ''.join(random.choices(string.digits, k=OTP_LENGTH))
+    # Menggunakan pyotp untuk generate code
+    secret = user.get("otp_secret") or pyotp.random_base32()
+    
+    # Gunakan interval sesuai OTP_EXPIRY_SECONDS agar code valid selama durasi tersebut
+    totp = pyotp.TOTP(secret, interval=OTP_EXPIRY_SECONDS)
+    otp_code = totp.now()
+    
     expires_at = datetime.now() + timedelta(seconds=OTP_EXPIRY_SECONDS)
     save_otp(user["id"], otp_code, expires_at.isoformat(), telegram_id)
     
