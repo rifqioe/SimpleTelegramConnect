@@ -92,6 +92,14 @@ def authenticate_user(username: str, password: str):
 
     return dict(user) if user else None
 
+def get_user_by_username(username: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    user = cursor.fetchone()
+    conn.close()
+    return dict(user) if user else None
+
 def get_user_by_id(user_id: int):
     conn = get_connection()
     cursor = conn.cursor()
