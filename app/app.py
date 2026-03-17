@@ -60,7 +60,7 @@ def generate_otp_flow(user: dict):
 
     otp_code = generate_otp()
     expires_at = datetime.now() + timedelta(seconds=OTP_EXPIRY_SECONDS)
-    save_otp(user["id"], otp_code, expires_at.isoformat())
+    save_otp(user["id"], otp_code, expires_at.isoformat(), telegram_id=None)
 
     print("\n--- KODE OTP ---")
     print(f"Kode Anda: {otp_code}")

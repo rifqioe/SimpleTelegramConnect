@@ -27,7 +27,7 @@ from database.database import (
     get_user_by_id,
     get_user_by_telegram_id,
     get_telegram_link,
-    get_user_by_username,
+    get_user_by_identifier,
     save_otp,
     set_bot_state,
     get_bot_state,
@@ -37,17 +37,18 @@ from database.database import (
     STATE_WAIT_OTP,
 )
 
-def _generate_otp(user: dict):
+def _generate_otp(user: dict, telegram_id: str = None):
     otp_code = ''.join(random.choices(string.digits, k=OTP_LENGTH))
     expires_at = datetime.now() + timedelta(seconds=OTP_EXPIRY_SECONDS)
-    save_otp(user["id"], otp_code, expires_at.isoformat())
+    save_otp(user["id"], otp_code, expires_at.isoformat(), telegram_id)
     
     output = {
         "username": user["username"],
         "otp": otp_code,
-        "expired_at": expires_at.isoformat()
+        "expired_at": expires_at.isoformat(),
+        "telegram_id": telegram_id
     }
-    print(f"OTP Generated {json.dumps(output)}")
+    print(f"\nOTP: {json.dumps(output)}")
     return otp_code
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,22 +79,25 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     set_bot_state(telegram_id, STATE_WAIT_USER)
-    await update.message.reply_text("Silakan masukkan username Anda:")
+    await update.message.reply_text("Silakan masukkan Username atau Email Anda:")
     return STATE_WAIT_USER
 
 async def handle_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return STATE_WAIT_USER
+        
     telegram_id = str(update.effective_user.id)
-    username = update.message.text.strip()
-    user = get_user_by_username(username)
+    identifier = update.message.text.strip()
+    user = get_user_by_identifier(identifier)
     
     if not user:
         await update.message.reply_text(
-            "Akun tidak ditemukan. Silakan masukkan username yang benar, atau ketik /cancel untuk membatalkan."
+            "Akun tidak ditemukan. Silakan masukkan Username/Email yang benar, atau ketik /cancel untuk membatalkan."
         )
         return STATE_WAIT_USER
         
     context.user_data['login_user'] = user
-    _generate_otp(user)
+    _generate_otp(user, telegram_id)
     
     set_bot_state(telegram_id, STATE_WAIT_OTP, {"login_user": user})
     
@@ -105,11 +109,14 @@ async def handle_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return STATE_WAIT_OTP
 
 async def handle_otp_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return STATE_WAIT_OTP
+
     telegram_id = str(update.effective_user.id)
     otp_code = update.message.text.strip()
     user = context.user_data.get('login_user')
     
-    verified_user_id = verify_otp(otp_code)
+    verified_user_id = verify_otp(otp_code, telegram_id)
     
     if verified_user_id and verified_user_id == user["id"]:
         telegram_username = update.effective_user.username
@@ -138,7 +145,7 @@ async def resend_otp_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Tidak ada sesi login yang aktif.")
         return ConversationHandler.END
         
-    _generate_otp(user)
+    _generate_otp(user, telegram_id)
     set_bot_state(telegram_id, STATE_WAIT_OTP, {"login_user": user})
     
     await update.message.reply_text("OTP baru telah digenerate di console server. Silakan kirimkan OTP baru tersebut ke sini.")
@@ -171,7 +178,7 @@ async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     otp_code = context.args[0]
-    user_id = verify_otp(otp_code)
+    user_id = verify_otp(otp_code, telegram_id)
 
     if user_id:
         success = link_telegram(user_id, telegram_id, telegram_username)

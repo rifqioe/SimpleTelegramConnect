@@ -23,6 +23,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            email TEXT,
             password_hash TEXT NOT NULL,
             name TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -44,6 +45,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS otp_codes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            telegram_id TEXT,
             otp_code TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP NOT NULL,
@@ -75,17 +77,17 @@ def seed_dummy_users():
     cursor = conn.cursor()
 
     dummy_users = [
-        ("admin", "admin123", "Administrator"),
-        ("rifqi", "password123", "Rifqi"),
-        ("john", "john456", "John Doe"),
-        ("jane", "jane789", "Jane Smith"),
+        ("admin", "admin@example.com", "admin123", "Administrator"),
+        ("rifqi", "rifqi@example.com", "password123", "Rifqi"),
+        ("john", "john@example.com", "john456", "John Doe"),
+        ("jane", "jane@example.com", "jane789", "Jane Smith"),
     ]
 
-    for username, password, name in dummy_users:
+    for username, email, password, name in dummy_users:
         try:
             cursor.execute(
-                "INSERT INTO users (username, password_hash, name) VALUES (?, ?, ?)",
-                (username, hash_password(password), name)
+                "INSERT INTO users (username, email, password_hash, name) VALUES (?, ?, ?, ?)",
+                (username, email, hash_password(password), name)
             )
         except sqlite3.IntegrityError:
             pass
@@ -115,6 +117,14 @@ def get_user_by_username(username: str):
     conn.close()
     return dict(user) if user else None
 
+def get_user_by_identifier(identifier: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ? OR email = ?", (identifier, identifier))
+    user = cursor.fetchone()
+    conn.close()
+    return dict(user) if user else None
+
 def get_user_by_id(user_id: int):
     conn = get_connection()
     cursor = conn.cursor()
@@ -123,7 +133,7 @@ def get_user_by_id(user_id: int):
     conn.close()
     return dict(user) if user else None
 
-def save_otp(user_id: int, otp_code: str, expires_at: str):
+def save_otp(user_id: int, otp_code: str, expires_at: str, telegram_id: str = None):
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -133,14 +143,14 @@ def save_otp(user_id: int, otp_code: str, expires_at: str):
     )
 
     cursor.execute(
-        "INSERT INTO otp_codes (user_id, otp_code, expires_at) VALUES (?, ?, ?)",
-        (user_id, otp_code, expires_at)
+        "INSERT INTO otp_codes (user_id, telegram_id, otp_code, expires_at) VALUES (?, ?, ?, ?)",
+        (user_id, telegram_id, otp_code, expires_at)
     )
 
     conn.commit()
     conn.close()
 
-def verify_otp(otp_code: str):
+def verify_otp(otp_code: str, telegram_id: str = None):
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -151,6 +161,12 @@ def verify_otp(otp_code: str):
     otp_record = cursor.fetchone()
 
     if otp_record:
+        # Pengecekan telegram_id jika ada (keamanan tambahan)
+        db_telegram_id = otp_record["telegram_id"]
+        if db_telegram_id and db_telegram_id != telegram_id:
+            conn.close()
+            return None
+
         cursor.execute(
             "UPDATE otp_codes SET is_used = 1 WHERE id = ?",
             (otp_record["id"],)
@@ -214,8 +230,6 @@ def unlink_telegram(user_id: int):
     conn.commit()
     conn.close()
     return True
-
-# --- BOT SESSION PERSISTENCE ---
 
 def set_bot_state(telegram_id: str, state: int, context_data: dict = None):
     conn = get_connection()
