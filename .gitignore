@@ -1,0 +1,26 @@
+# Environments
+.env
+
+# Database
+telegram_connect.db
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# OS generated files
+.DS_Store
+Thumbs.db
