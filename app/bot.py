@@ -29,9 +29,13 @@ from database.database import (
     get_telegram_link,
     get_user_by_username,
     save_otp,
+    set_bot_state,
+    get_bot_state,
+    clear_bot_state,
+    STATE_IDLE,
+    STATE_WAIT_USER,
+    STATE_WAIT_OTP,
 )
-
-WAIT_USER, WAIT_OTP = range(2)
 
 def _generate_otp(user: dict):
     otp_code = ''.join(random.choices(string.digits, k=OTP_LENGTH))
@@ -67,15 +71,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -- FLOW /login --
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = str(update.effective_user.id)
+    
     existing_user = get_user_by_telegram_id(telegram_id)
     if existing_user:
         await update.message.reply_text(f"Telegram sudah terhubung dengan akun: {existing_user['username']}")
         return ConversationHandler.END
 
+    set_bot_state(telegram_id, STATE_WAIT_USER)
     await update.message.reply_text("Silakan masukkan username Anda:")
-    return WAIT_USER
+    return STATE_WAIT_USER
 
 async def handle_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = str(update.effective_user.id)
     username = update.message.text.strip()
     user = get_user_by_username(username)
     
@@ -83,26 +90,28 @@ async def handle_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Akun tidak ditemukan. Silakan masukkan username yang benar, atau ketik /cancel untuk membatalkan."
         )
-        return WAIT_USER
+        return STATE_WAIT_USER
         
     context.user_data['login_user'] = user
     _generate_otp(user)
+    
+    set_bot_state(telegram_id, STATE_WAIT_OTP, {"login_user": user})
     
     await update.message.reply_text(
         "OTP telah digenerate di console server (CMD).\n"
         "Silakan kirimkan kode OTP Anda ke sini.\n\n"
         "Ketik /resendotp jika ingin generate ulang, atau /cancel untuk membatalkan."
     )
-    return WAIT_OTP
+    return STATE_WAIT_OTP
 
 async def handle_otp_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = str(update.effective_user.id)
     otp_code = update.message.text.strip()
     user = context.user_data.get('login_user')
     
     verified_user_id = verify_otp(otp_code)
     
     if verified_user_id and verified_user_id == user["id"]:
-        telegram_id = str(update.effective_user.id)
         telegram_username = update.effective_user.username
         
         success = link_telegram(verified_user_id, telegram_id, telegram_username)
@@ -115,24 +124,29 @@ async def handle_otp_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Gagal menghubungkan akun.")
         
+        clear_bot_state(telegram_id)
         context.user_data.clear()
         return ConversationHandler.END
     else:
         await update.message.reply_text("OTP tidak valid atau expired. Silakan kirimkan OTP yang benar, /resendotp, atau /cancel.")
-        return WAIT_OTP
+        return STATE_WAIT_OTP
 
 async def resend_otp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = str(update.effective_user.id)
     user = context.user_data.get('login_user')
     if not user:
         await update.message.reply_text("Tidak ada sesi login yang aktif.")
         return ConversationHandler.END
         
     _generate_otp(user)
+    set_bot_state(telegram_id, STATE_WAIT_OTP, {"login_user": user})
     
     await update.message.reply_text("OTP baru telah digenerate di console server. Silakan kirimkan OTP baru tersebut ke sini.")
-    return WAIT_OTP
+    return STATE_WAIT_OTP
     
 async def cancel_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = str(update.effective_user.id)
+    clear_bot_state(telegram_id)
     context.user_data.clear()
     await update.message.reply_text("Login dibatalkan.")
     return ConversationHandler.END
@@ -239,13 +253,15 @@ def run_bot():
     login_handler = ConversationHandler(
         entry_points=[CommandHandler("login", login_command)],
         states={
-            WAIT_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_username)],
-            WAIT_OTP: [
+            STATE_WAIT_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_username)],
+            STATE_WAIT_OTP: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp_login),
                 CommandHandler("resendotp", resend_otp_command)
             ]
         },
-        fallbacks=[CommandHandler("cancel", cancel_login)]
+        fallbacks=[CommandHandler("cancel", cancel_login)],
+        name="login_conversation",
+        persistent=False # We use manual DB tracking for now
     )
     app.add_handler(login_handler)
     

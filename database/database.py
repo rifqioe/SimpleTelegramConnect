@@ -5,6 +5,11 @@ from datetime import datetime
 
 DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_connect.db")
 
+# Conversation States
+STATE_IDLE = 0
+STATE_WAIT_USER = 1
+STATE_WAIT_OTP = 2
+
 def get_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
@@ -44,6 +49,16 @@ def init_db():
             expires_at TIMESTAMP NOT NULL,
             is_used INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Tabel bot_sessions - untuk persistensi state percakapan bot
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_sessions (
+            telegram_id TEXT PRIMARY KEY,
+            state INTEGER DEFAULT 0,
+            context_data TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -199,6 +214,49 @@ def unlink_telegram(user_id: int):
     conn.commit()
     conn.close()
     return True
+
+# --- BOT SESSION PERSISTENCE ---
+
+def set_bot_state(telegram_id: str, state: int, context_data: dict = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    import json
+    data_str = json.dumps(context_data) if context_data else None
+    
+    cursor.execute("""
+        INSERT INTO bot_sessions (telegram_id, state, context_data, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(telegram_id) DO UPDATE SET
+            state = excluded.state,
+            context_data = excluded.context_data,
+            updated_at = CURRENT_TIMESTAMP
+    """, (telegram_id, state, data_str))
+    
+    conn.commit()
+    conn.close()
+
+def get_bot_state(telegram_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM bot_sessions WHERE telegram_id = ?", (telegram_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        import json
+        return {
+            "state": row["state"],
+            "context_data": json.loads(row["context_data"]) if row["context_data"] else {}
+        }
+    return {"state": STATE_IDLE, "context_data": {}}
+
+def clear_bot_state(telegram_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM bot_sessions WHERE telegram_id = ?", (telegram_id,))
+    conn.commit()
+    conn.close()
+
 
 if __name__ == "__main__":
     init_db()
